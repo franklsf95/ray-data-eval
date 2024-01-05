@@ -32,10 +32,18 @@ def run_experiment(
     items = list(range(num_parts))
     ds = env.from_collection(items, type_info=Types.INT())
 
+    # Ways to disable chaining of two map operators
+    # 1. append .disable_chaining()
     ds = ds.map(
         lambda x: memory_blowup(x, producer_time),
         output_type=Types.TUPLE([Types.PICKLED_BYTE_ARRAY(), Types.INT()]),
     ).disable_chaining()
+
+    # Default, with chaining
+    # ds = ds.map(
+    #     lambda x: memory_blowup(x, producer_time),
+    #     output_type=Types.TUPLE([Types.PICKLED_BYTE_ARRAY(), Types.INT()]),
+    # )
 
     ds = ds.map(lambda x: memory_shrink(x, consumer_time), output_type=Types.LONG())
 
@@ -50,12 +58,12 @@ def run_experiment(
 
 def main():
     # Using `THREAD` mode
-    config = Configuration()
-    config.set_string("python.execution-mode", "thread")
-    env = StreamExecutionEnvironment.get_execution_environment(config)
+    # config = Configuration()
+    # config.set_string("python.execution-mode", "thread")
+    # env = StreamExecutionEnvironment.get_execution_environment(config)
 
     # Using default `PROCESS` mode
-    # env = StreamExecutionEnvironment.get_execution_environment()
+    env = StreamExecutionEnvironment.get_execution_environment()
 
     config = {
         "parallelism": 20,
