@@ -4,6 +4,7 @@ from local disk and (for supported data loaders) cloud storage. Pass a --data-ro
 --parquet-data-root, --tf-data-root, and/or --mosaic-data-root pointing to the
 dataset directory. Throughputs are written to `output.csv` in total images/s.
 """
+
 import ray
 import torch
 import torchvision
@@ -44,6 +45,15 @@ def iterate(dataset, label, batch_size, output_file=None):
             batch = batch[0]
         else:
             batch = batch["image"]
+        # print("iterate:", type(batch))
+        # print("iterate:", type(batch[0]))
+        # print("iterate:", batch.shape)
+        # print("iterate:", batch[0].shape)
+        # from PIL import Image
+
+        # im = torchvision.transforms.ToPILImage()(batch[0])
+        # im.save("test.png")
+        # return
         num_rows += batch.shape[0]
         if num_rows >= print_at:
             print(f"Read {num_rows} rows")
@@ -60,7 +70,12 @@ def iterate(dataset, label, batch_size, output_file=None):
         f.write(f"{label},{tput}\n")
 
 
-def build_torch_dataset(root_dir, batch_size, shuffle=False, num_workers=None, transform=None):
+def build_torch_dataset(
+    root_dir, batch_size, shuffle=False, num_workers=None, transform=None
+):
+    # print(torch.get_num_threads())
+    # torch.set_num_threads(8)
+    # print(torch.get_num_threads())
     if num_workers is None:
         num_workers = os.cpu_count()
 
@@ -71,6 +86,7 @@ def build_torch_dataset(root_dir, batch_size, shuffle=False, num_workers=None, t
         shuffle=shuffle,
         num_workers=num_workers,
         persistent_workers=True,
+        # persistent_workers=False,
     )
     return data_loader
 
@@ -78,7 +94,9 @@ def build_torch_dataset(root_dir, batch_size, shuffle=False, num_workers=None, t
 def parse_and_decode_tfrecord(example_serialized):
     feature_map = {
         "image/encoded": tf.io.FixedLenFeature([], dtype=tf.string, default_value=""),
-        "image/class/label": tf.io.FixedLenFeature([], dtype=tf.int64, default_value=-1),
+        "image/class/label": tf.io.FixedLenFeature(
+            [], dtype=tf.int64, default_value=-1
+        ),
     }
 
     features = tf.io.parse_single_example(example_serialized, feature_map)
@@ -156,7 +174,9 @@ def tf_crop_and_flip(image_buffer, num_channels=3):
 
 
 def build_tfrecords_tf_dataset(data_root, batch_size):
-    filenames = [os.path.join(data_root, pathname) for pathname in os.listdir(data_root)]
+    filenames = [
+        os.path.join(data_root, pathname) for pathname in os.listdir(data_root)
+    ]
     ds = tf.data.Dataset.from_tensor_slices(filenames)
     ds = ds.interleave(tf.data.TFRecordDataset).map(
         parse_and_decode_tfrecord, num_parallel_calls=tf.data.experimental.AUTOTUNE
@@ -207,22 +227,59 @@ def get_transform(to_torch_tensor):
     return transform
 
 
+def get_transform_2(to_torch_tensor):
+    # Note(swang): This is a different order from tf.data.
+    # torch: decode -> randCrop+resize -> randFlip
+    # tf.data: decode -> randCrop -> randFlip -> resize
+    transform = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.RandomHorizontalFlip(),
+        ]
+        + ([torchvision.transforms.ToTensor()] if to_torch_tensor else [])
+    )
+    return transform
+
+
 # Capture `transform`` in the map UDFs.
 transform = get_transform(False)
+transform_2 = get_transform_2(False)
 
 
 def crop_and_flip_image(row):
     # Make sure to use torch.tensor here to avoid a copy from numpy.
-    row["image"] = transform(torch.tensor(np.transpose(row["image"], axes=(2, 0, 1))))
+    row["image"] = transform(
+        torch.tensor(np.transpose(row["image"], axes=(2, 0, 1)))
+    )  # This is the default
+
+    # from PIL import Image
+    # row["image"] = transform(Image.fromarray(row["image"])) # Tput=966
+    # row["image"] = row['image'] # This is fast. Tput = 1489.8658713256136
+    # row['image'] = torch.tensor(row['image']) # This is significantly slower. Tput = 1225.9583741373604
+    # row['image'] = np.transpose(row['image'], axes=(2, 0, 1))
+    # row["image"] = transform(torch.tensor(row["image"]).permute(2, 0, 1))
     return row
 
 
 def crop_and_flip_image_batch(image_batch):
-    image_batch["image"] = transform(
+    # print(image_batch["image"].shape)
+    # np.array([
+    #     np.transpose(img, axes=(2, 0, 1)) for img in image_batch["image"]
+    # ])
+
+    # image_batch["image"] = transform(image_batch["image"])
+
+    image_batch["image"] = transform_2(
         # Make sure to use torch.tensor here to avoid a copy from numpy.
         # Original dims are (batch_size, channels, height, width).
         torch.tensor(np.transpose(image_batch["image"], axes=(0, 3, 1, 2)))
     )
+    # from PIL import Image
+    # image_batch['image'] = transform([Image.fromarray(img) for img in image_batch["image"]])
+
+    # shape of image_batch['image'] (32,) where each item is an image e.g. of shape (375, 500, 3)
+    # print(type(image_batch["image"][0]))
+    # image_batch['image'] = np.transpose(image_batch["image"], axes=(0, 3, 1, 2))
+    # print(image_batch['image'])
     return image_batch
 
 
@@ -230,6 +287,16 @@ def decode_image_crop_and_flip(row):
     row["image"] = Image.frombytes("RGB", (row["height"], row["width"]), row["image"])
     # Convert back np to avoid storing a np.object array.
     return {"image": np.array(transform(row["image"]))}
+
+
+def _collate_fn_arr_pil_images_to_tensor(batch: np.ndarray) -> torch.Tensor:
+    batch = batch["image"]
+    
+    arrays = np.transpose(batch, axes=(0, 3, 1, 2))
+    tensor_batch = torch.from_numpy(arrays)
+    
+    batch = {"image": tensor_batch}
+    return batch
 
 
 class MdsDatasource(ray.data.datasource.FileBasedDatasource):
@@ -296,7 +363,9 @@ class S3MosaicDataset(StreamingDataset):
         return self.transforms(image), label
 
 
-def build_mosaic_dataloader(mosaic_data_root, batch_size, num_workers=None, tranform=None):
+def build_mosaic_dataloader(
+    mosaic_data_root, batch_size, num_workers=None, tranform=None
+):
     # MosaicML StreamingDataset.
     use_s3 = mosaic_data_root.startswith("s3://")
 
@@ -330,7 +399,9 @@ def build_mosaic_dataloader(mosaic_data_root, batch_size, num_workers=None, tran
     return mosaic_dl
 
 
-def build_hf_dataloader(data_root, batch_size, from_images, num_workers=None, transform=None):
+def build_hf_dataloader(
+    data_root, batch_size, from_images, num_workers=None, transform=None
+):
     if num_workers is None:
         num_workers = os.cpu_count()
 
@@ -338,7 +409,9 @@ def build_hf_dataloader(data_root, batch_size, from_images, num_workers=None, tr
 
     def transforms(examples):
         if from_images:
-            examples["image"] = [transform(image.convert("RGB")) for image in examples["image"]]
+            examples["image"] = [
+                transform(image.convert("RGB")) for image in examples["image"]
+            ]
         else:
             examples["image"] = [
                 transform(Image.frombytes("RGB", (height, width), image))
@@ -382,7 +455,9 @@ def build_hf_dataloader(data_root, batch_size, from_images, num_workers=None, tr
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run single-node batch iteration benchmarks.")
+    parser = argparse.ArgumentParser(
+        description="Run single-node batch iteration benchmarks."
+    )
 
     parser.add_argument(
         "--data-root",
@@ -407,7 +482,8 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help=(
-            "Directory path with MDS files. Directory structure should be " '"<data_root>/*.mds"'
+            "Directory path with MDS files. Directory structure should be "
+            '"<data_root>/*.mds"'
         ),
     )
     parser.add_argument(
@@ -449,14 +525,14 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.data_root is not None:
-        # tf.data, load images.
-        tf_dataset = tf.keras.preprocessing.image_dataset_from_directory(
-            args.data_root,
-            batch_size=args.batch_size,
-            image_size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE),
-        )
-        for i in range(args.num_epochs):
-            iterate(tf_dataset, "tf_data", args.batch_size, args.output_file)
+        # # tf.data, load images.
+        # tf_dataset = tf.keras.preprocessing.image_dataset_from_directory(
+        #     args.data_root,
+        #     batch_size=args.batch_size,
+        #     image_size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE),
+        # )
+        # for i in range(args.num_epochs):
+        #     iterate(tf_dataset, "tf_data", args.batch_size, args.output_file)
 
         # tf.data, with transform.
         tf_dataset = tf.keras.preprocessing.image_dataset_from_directory(args.data_root)
@@ -470,92 +546,90 @@ if __name__ == "__main__":
                 args.output_file,
             )
 
-        # torch, load images.
-        torch_resize_transform = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.Resize((DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE)),
-                torchvision.transforms.ToTensor(),
-            ]
-        )
-        torch_dataset = build_torch_dataset(
-            args.data_root,
-            args.batch_size,
-            num_workers=args.torch_num_workers,
-            transform=torch_resize_transform,
-        )
-        for i in range(args.num_epochs):
-            iterate(torch_dataset, "torch", args.batch_size, args.output_file)
+        # # torch, load images.
+        # from torch.profiler import profile, ProfilerActivity, record_function
+        # def iterate_with_profiling(torch_dataset, name, batch_size, output_file, epoch=1):
+        #     with profile(activities=[ProfilerActivity.CPU], with_stack=True) as prof:
+        #         with record_function(name):
+        #                 iterate(torch_dataset, "torch", batch_size, output_file)
 
-        # torch, with transform.
-        torch_dataset = build_torch_dataset(
-            args.data_root,
-            args.batch_size,
-            num_workers=args.torch_num_workers,
-            transform=get_transform(True),
-        )
-        for i in range(args.num_epochs):
-            iterate(
-                torch_dataset,
-                "torch+transform",
-                args.batch_size,
-                args.output_file,
-            )
+        #     print(prof.key_averages(group_by_stack_n=5).table(sort_by="cpu_time_total", row_limit=10))
+        #     prof.export_chrome_trace(name + f"-{epoch}" + "-trace.json")
+        #     # prof.export_stacks("profiler_stacks.txt", "self_cpu_time_total")
 
-        # HuggingFace Datasets, load images.
-        hf_dataset = build_hf_dataloader(
-            args.data_root,
-            args.batch_size,
-            from_images=True,
-            num_workers=args.torch_num_workers,
-            transform=torch_resize_transform,
-        )
-        for i in range(args.num_epochs):
-            iterate(
-                hf_dataset,
-                "HF",
-                args.batch_size,
-                args.output_file,
-            )
+        # torch_resize_transform = torchvision.transforms.Compose(
+        #     [
+        #         torchvision.transforms.Resize((DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE)),
+        #         torchvision.transforms.ToTensor(),
+        #     ]
+        # )
+        # torch_dataset = build_torch_dataset(
+        #     args.data_root,
+        #     args.batch_size,
+        #     num_workers=args.torch_num_workers,
+        #     transform=torch_resize_transform,
+        # )
+        # for i in range(args.num_epochs):
+        #     iterate(torch_dataset, "torch", args.batch_size, args.output_file)
 
-        # HuggingFace Datasets, with transform.
-        hf_dataset = build_hf_dataloader(
-            args.data_root,
-            args.batch_size,
-            from_images=True,
-            num_workers=args.torch_num_workers,
-            transform=get_transform(True),
-        )
-        for i in range(args.num_epochs):
-            iterate(
-                hf_dataset,
-                "HF+transform",
-                args.batch_size,
-                args.output_file,
-            )
+        # # torch, with transform.
+        # torch_dataset = build_torch_dataset(
+        #     args.data_root,
+        #     args.batch_size,
+        #     num_workers=args.torch_num_workers,
+        #     transform=get_transform(True),
+        # )
+        # for i in range(args.num_epochs):
+        #     iterate(
+        #         torch_dataset,
+        #         "torch+transform",
+        #         args.batch_size,
+        #         args.output_file,
+        #     )
 
-        # ray.data, load images.
-        ray_dataset = ray.data.read_images(
-            args.data_root, mode="RGB", size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE)
-        )
-        for i in range(args.num_epochs):
-            iterate(
-                ray_dataset.iter_torch_batches(batch_size=args.batch_size),
-                "ray_data",
-                args.batch_size,
-                args.output_file,
-            )
+        # # ray.data, load images.
+        # ray.init(num_cpus=8)
+        # ray_dataset = ray.data.read_images(
+        #     args.data_root,
+        #     mode="RGB",
+        #     size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE),
+        #     # override_num_blocks=(13000 // args.batch_size)
+        # )
+
+        # for i in range(args.num_epochs):
+        #     iterate(
+        #         # ray_dataset.iter_torch_batches(batch_size=args.batch_size),
+        #         ray_dataset.iter_batches(
+        #             batch_size=args.batch_size, prefetch_batches=1
+        #         ),
+        #         "ray_data",
+        #         args.batch_size,
+        #         args.output_file,
+        #     )
+        # print(ray_dataset.stats())
+        # ray.shutdown()
 
         # ray.data, with transform.
-        ray_dataset = ray.data.read_images(args.data_root, mode="RGB").map(crop_and_flip_image)
+        ray.init(num_cpus=8)
+        ray_dataset = ray.data.read_images(
+            args.data_root,
+            mode="RGB",
+            # size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE),
+            transform=get_transform(False),
+        )
         for i in range(args.num_epochs):
             iterate(
-                ray_dataset.iter_batches(batch_size=args.batch_size),
+                ray_dataset.iter_torch_batches(
+                    batch_size=args.batch_size,
+                    collate_fn=_collate_fn_arr_pil_images_to_tensor,
+                ),
                 "ray_data+map_transform",
                 args.batch_size,
                 args.output_file,
             )
-        # Harmess Error on deletion. Known issue:
-        # https://github.com/ray-project/ray/issues/42382
+        ray.shutdown()
+        # # # Harmess Error on deletion. Known issue:
+        # # # https://github.com/ray-project/ray/issues/42382
 
     if args.tf_data_root is not None:
         # TFRecords dataset.
