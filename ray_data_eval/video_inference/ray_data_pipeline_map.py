@@ -42,7 +42,7 @@ if args.source == "local":
     INPUT_PATH = labels
 else:
     print("Using S3 data.")
-    INPUT_PATH = "s3://ray-data-eval-us-west-2/kinetics/k700-2020/"
+    INPUT_PATH = "s3://ray-data-eval-us-west-2/kinetics/k700-2020/test"
 
 
 def timeit(name=None):
