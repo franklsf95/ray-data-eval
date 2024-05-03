@@ -42,6 +42,8 @@ def test_scheduling_policy(problem: SchedulingProblem, policy: SchedulingPolicy)
         logging.info("-" * 60)
         logging.info(f"Tick {tick}")
         env.tick()
+        if env.check_all_tasks_finished():
+            break
 
     env.print_timeline()
     ret = env.check_all_tasks_finished()
@@ -49,11 +51,15 @@ def test_scheduling_policy(problem: SchedulingProblem, policy: SchedulingPolicy)
 
 
 def main():
-    problem = e2e_problem
-    # policy = GreedyPolicy(problem)
+    problem = e2e_problem2
+    policy = GreedyPolicy(problem)
     # policy = GreedyWithBufferPolicy(problem)
     # policy = GreedyOracleConsumerFirstPolicy(problem)
-    policy = DelayPolicy(problem)
+    # policy = GreedyOracleProducerFirstPolicy(problem)
+    # policy = GreedyOracleConsumerFirstPolicy(problem)
+    # policy = ConcurrencyCapPolicy(problem)
+    # policy = RatesEqualizingPolicy(problem)
+    # policy = DelayPolicy(problem)
     test_scheduling_policy(problem, policy)
 
 

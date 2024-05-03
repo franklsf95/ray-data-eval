@@ -251,7 +251,7 @@ class Executor:
         for i, item in enumerate(self._timeline):
             if "_" in item:
                 item = item.split("_")[0]
-            if i >= 30:
+            if i >= max_time + 1:
                 break
             print(f" {item:<3} |", end="")
         print("|")
@@ -286,9 +286,11 @@ class ExecutionEnvironment:
 
         def _sort_key(executor: Executor) -> tuple[int, int]:
             if executor.running_task is None:
-                return 100000, 100000 # Sorted last. 
+                return 100000, 100000  # Sorted last.
             remaining_ticks = executor.running_task.remaining_ticks
-            net_output_size = executor.running_task.spec.output_size - executor.running_task.spec.input_size
+            net_output_size = (
+                executor.running_task.spec.output_size - executor.running_task.spec.input_size
+            )
             # Net_output_size first: decreasing buffer usage.
             return net_output_size, remaining_ticks
 

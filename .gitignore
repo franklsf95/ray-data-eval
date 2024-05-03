@@ -3,6 +3,7 @@ bin
 data
 logs
 target
+thirdparty
 wandb
 __pycache__
 *.egg-info
@@ -14,4 +15,4 @@ wandb
 .terraform
 .terraform.*
 terraform.*
-**/_*.yml
+_*.yml

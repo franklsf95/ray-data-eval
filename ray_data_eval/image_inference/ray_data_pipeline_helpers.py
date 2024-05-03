@@ -1,9 +1,6 @@
 import boto3
-import csv
 import json
-import os
 import ray
-import re
 import time
 
 
@@ -92,59 +89,11 @@ def get_prefixes(bucket_name, prefix):
     return prefixes, len(prefixes)
 
 
-def postprocess(logging_file):
-    if not os.path.exists(logging_file):
-        print(f"File {logging_file} does not exist.")
-        return
-    start_time_pattern = r"\[Start Time\] (\d+\.\d+)"
-    batch_pattern = r"\[Completed Batch\] (\d+\.\d+) (\d+)"
-
-    start_time = None
-    batch_finish_times = []
-
-    with open(logging_file, "r") as f:
-        for line in f:
-            if not start_time:
-                match = re.search(start_time_pattern, line)
-                if match:
-                    start_time = float(match.group(1))
-                    print(f"Found start time: {start_time}")
-            else:
-                match = re.search(batch_pattern, line)
-                if match:
-                    timestamp = float(match.group(1))
-                    batch_size = int(match.group(2))
-
-                    elapsed_time = timestamp - start_time
-                    if elapsed_time > 0:
-                        batch_finish_times.append((elapsed_time, batch_size))
-                    print(f"Found batch completion: Completed {batch_size} at {elapsed_time}")
-
-    batch_finish_times = sorted(batch_finish_times, key=lambda x: x[0])
-
-    accumulated_size = 0
-    results = []
-    for elapsed_time, batch_size in batch_finish_times:
-        accumulated_size += batch_size
-        results.append((elapsed_time, accumulated_size))
-
-    csv_filename = logging_file.replace(".out", ".csv")
-    csv_ref = open(csv_filename, "w")
-    print(f"Created csv file: {csv_filename}")
-    writer = csv.writer(csv_ref)
-    writer.writerow(["time_from_start", "number_of_rows_finished"])
-    writer.writerow([0, 0])
-    for result in results:
-        writer.writerow(result)
-    csv_ref.close()
-    return
-
-
 def download_train_directories(
     bucket_name,
     prefix,
-    percentage=1,
-    output_file="kinetics-train-1-percent.txt",
+    percentage=10,
+    output_file="kinetics-train-10-percent.txt",
 ):
     directories, count = get_prefixes(bucket_name, prefix)
     num_samples = len(directories) * percentage // 100

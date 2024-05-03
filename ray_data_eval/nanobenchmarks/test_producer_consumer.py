@@ -6,7 +6,7 @@ import numpy as np
 import ray
 import datetime
 
-LOG_FILE = "test_large_e2e_backpressure.log"
+LOG_FILE = "test_producer_consumer.log"
 
 
 class Logger:
@@ -34,7 +34,7 @@ logger = Logger()
 TIME_UNIT = 0.5
 
 
-def test_large_e2e_backpressure():
+def test_producer_consumer():
     """Test backpressure on a synthetic large-scale workload."""
     # The cluster has 10 CPUs and 200MB object store memory.
     # The dataset will have 200MB * 25% = 50MB memory budget.
@@ -55,8 +55,8 @@ def test_large_e2e_backpressure():
 
     os.environ["RAY_DATA_OP_RESERVATION_RATIO"] = "0"
 
-    NUM_CPUS = 8
-    NUM_ROWS_PER_TASK = 10
+    NUM_CPUS = 2
+    NUM_ROWS_PER_TASK = 2
     NUM_TASKS = 16
     NUM_ROWS_TOTAL = NUM_ROWS_PER_TASK * NUM_TASKS
     BLOCK_SIZE = 10 * 1024 * 1024
@@ -69,9 +69,9 @@ def test_large_e2e_backpressure():
 
     def produce(batch):
         logger.log({"name": "producer_start", "id": [int(x) for x in batch["id"]]})
-        time.sleep(TIME_UNIT * 10)
         for id in batch["id"]:
-            # logger.log({"name": "produce", "id": int(id)})
+            time.sleep(TIME_UNIT * 1)
+            logger.log({"name": "produce", "id": int(id)})
             yield {
                 "id": [id],
                 "image": [np.zeros(BLOCK_SIZE, dtype=np.uint8)],
@@ -79,14 +79,14 @@ def test_large_e2e_backpressure():
 
     def consume(batch):
         logger.log({"name": "consume", "id": int(batch["id"])})
-        time.sleep(TIME_UNIT)
+        time.sleep(TIME_UNIT * 1)
         return {"id": batch["id"], "result": [0 for _ in batch["id"]]}
 
     data_context = ray.data.DataContext.get_current()
     data_context.execution_options.verbose_progress = True
     data_context.target_max_block_size = BLOCK_SIZE
 
-    ray.init(num_cpus=NUM_CPUS, object_store_memory=250 * 1024 * 1024)
+    ray.init(num_cpus=NUM_CPUS, object_store_memory=BLOCK_SIZE * 8)
 
     ds = ray.data.range(NUM_ROWS_TOTAL, override_num_blocks=NUM_TASKS)
     ds = ds.map_batches(produce, batch_size=NUM_ROWS_PER_TASK)
@@ -101,10 +101,9 @@ def test_large_e2e_backpressure():
         pass
     end_time = time.time()
     print(ds.stats())
-    print(ray._private.internal_api.memory_summary(stats_only=True))
     print(f"Total time: {end_time - start_time:.4f}s")
     ray.timeline("timeline.json")
 
 
 if __name__ == "__main__":
-    test_large_e2e_backpressure()
+    test_producer_consumer()
