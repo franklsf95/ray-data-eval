@@ -8,10 +8,12 @@ from pyflink.common import Configuration
 
 from ray_data_eval.common.types import SchedulingProblem, test_problem
 
-DATA_SIZE_BYTES = 1000 * 1000 * 100  # 100 MB
+DATA_SIZE_BYTES = 1000 * 1000 * 1  # 100 MB
 TIME_UNIT = 1  # seconds
 PRODUCER_PARALLELISM = 2
 CONSUMER_PARALLELISM = 4
+
+EXECUTION_MODE = "process"
 
 
 class Producer(MapFunction):
@@ -105,10 +107,8 @@ def run_flink(env, cfg: SchedulingProblem):
 
 
 def run_experiment(cfg: SchedulingProblem):
-    # env = StreamExecutionEnvironment.get_execution_environment()
-
     config = Configuration()
-    config.set_string("python.execution-mode", "thread")
+    config.set_string("python.execution-mode", EXECUTION_MODE)
     env = StreamExecutionEnvironment.get_execution_environment(config)
 
     # env.set_parallelism(cfg.num_producers)

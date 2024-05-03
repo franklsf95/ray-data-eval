@@ -36,19 +36,25 @@ FULL_IMAGE_SIZE = (1213, 1546)
 
 
 def iterate(dataset, label, batch_size, output_file=None):
+    PRINT_EVERY = 100
     start = time.time()
     it = iter(dataset)
     num_rows = 0
-    print_at = 1000
+    print_at = PRINT_EVERY
+    last_print_time = start
     for batch in it:
         if isinstance(batch, tuple) or isinstance(batch, list):
             batch = batch[0]
         else:
             batch = batch["image"]
-        num_rows += batch.shape[0]
+        if hasattr(batch, "shape"):
+            num_rows += batch.shape[0]
+        else:
+            num_rows += len(batch)
         if num_rows >= print_at:
-            print(f"Read {num_rows} rows")
-            print_at = ((num_rows // 1000) + 1) * 1000
+            print(f"Read {num_rows} rows in {time.time() - last_print_time} seconds.")
+            print_at = ((num_rows // PRINT_EVERY) + 1) * PRINT_EVERY
+            last_print_time = time.time()
     end = time.time()
     print(label, end - start, "epoch", i)
 
@@ -555,7 +561,10 @@ if __name__ == "__main__":
 
         # ray.data, load images.
         ray_dataset = ray.data.read_images(
-            args.data_root, mode="RGB", size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE)
+            args.data_root,
+            mode="RGB",
+            size=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE),
+            override_num_blocks=(1000 // args.batch_size),
         )
         for i in range(args.num_epochs):
             iterate(
@@ -564,6 +573,7 @@ if __name__ == "__main__":
                 args.batch_size,
                 args.output_file,
             )
+        print(ray_dataset.stats())
 
         # ray.data, with transform.
         ray_dataset = ray.data.read_images(
@@ -582,6 +592,7 @@ if __name__ == "__main__":
                 args.batch_size,
                 args.output_file,
             )
+        print(ray_dataset.stats())
         # Harmess Error on deletion. Known issue:
         # https://github.com/ray-project/ray/issues/42382
 

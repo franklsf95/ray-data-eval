@@ -15,9 +15,9 @@ import tensorflow as tf  # noqa: E402
 
 tf.get_logger().setLevel("DEBUG")
 
-DATA_SIZE_MB = 100
+DATA_SIZE_MB = 10
 DATA_SIZE_BYTES = DATA_SIZE_MB * 1000 * 1000
-TIME_UNIT = 1  # seconds
+TIME_UNIT = 0.5  # seconds
 TF_PROFILER_LOGS = "logs/tf"
 
 
@@ -47,32 +47,46 @@ def get_options(cfg: SchedulingProblem):
     return options
 
 
-def run_tf_data(cfg: SchedulingProblem):
-    if cfg.num_producers != cfg.num_consumers:
-        raise NotImplementedError(f"num_producers != num_consumers: {cfg}")
+def producer_fn():
+    num_outputs = 10
+    time.sleep(num_outputs * TIME_UNIT)
+    for i in range(num_outputs):
+        data = np.full(DATA_SIZE_BYTES, i, dtype=np.uint8)
+        yield data
 
+
+def consumer_fn(data):
+    time.sleep(TIME_UNIT)
+    return len(data)
+
+
+def run_tf_data(cfg: SchedulingProblem):
     options = get_options(cfg)
     start = time.perf_counter()
 
     items = list(range(cfg.num_producers))
     ds = tf.data.Dataset.from_tensor_slices(items)
-    ds = ds.with_options(options).map(
-        lambda item: tf.numpy_function(
-            producer_factory(cfg),
-            [item],
-            Tout=tf.uint8,
+    ds = ds.with_options(options).interleave(
+        lambda item: tf.data.Dataset.from_generator(
+            producer_fn,
+            output_signature=tf.TensorSpec(shape=(DATA_SIZE_BYTES,), dtype=tf.uint8),
+            name="producer",
         ),
+        cycle_length=1,
         # num_parallel_calls=4,
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        name="producer_flat_map",
     )
     ds = ds.with_options(options).map(
         lambda item: tf.numpy_function(
-            consumer_factory(cfg),
-            [item],
+            consumer_fn,
+            inp=[item],
             Tout=tf.int64,
+            name="consumer",
         ),
         # num_parallel_calls=4,
         num_parallel_calls=tf.data.experimental.AUTOTUNE,
+        name="consumer_map",
     )
 
     ret = 0

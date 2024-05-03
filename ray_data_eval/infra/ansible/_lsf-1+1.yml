@@ -1,4 +1,0 @@
-all:
-  hosts:
-    node_10_0_32_40:
-      ansible_host: 10.0.32.40
