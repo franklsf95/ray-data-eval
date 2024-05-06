@@ -45,7 +45,9 @@ class FrameClassifier:
 ray.init(num_gpus=2)
 
 # Create a datastream from in-memory dummy base data.
-ds = ray.data.from_items([dummy_video_file(i) for i in range(NUM_VIDEOS)], override_num_blocks=NUM_VIDEOS)
+ds = ray.data.from_items(
+    [dummy_video_file(i) for i in range(NUM_VIDEOS)], override_num_blocks=NUM_VIDEOS
+)
 
 # Apply the decode step. We can customize the resources per
 # task. Here each decode task requests 4 CPUs.

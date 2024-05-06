@@ -3,10 +3,11 @@ A Hello World example of Spark Structured Streaming: Word count
 
 Runbook:
 1. run Netcat as a data server: nc -lk 9999
-2. in a different terminal, start the example: 
+2. in a different terminal, start the example:
     ./bin/spark-submit path/to/file/spark_streaming_wordcount.py localhost 9999
 3. any lines typed in the terminal running the netcat server will be counted and printed on screen every second
 """
+
 import os
 
 from pyspark.sql import SparkSession

@@ -16,3 +16,5 @@ wandb
 .terraform.*
 terraform.*
 _*.yml
+*.json
+*build*

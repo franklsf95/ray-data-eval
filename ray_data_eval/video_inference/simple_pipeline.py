@@ -21,8 +21,11 @@ INPUT_PATH = "/mnt/data/ray-data-eval/kinetics/Kinetics700-2020-test"
 
 ModelInputType = torch.Tensor
 
+
 def print_gpu_memory_usage():
-    print(f"Total GPU memory: {humanize.naturalsize(torch.cuda.get_device_properties(0).total_memory)}")
+    print(
+        f"Total GPU memory: {humanize.naturalsize(torch.cuda.get_device_properties(0).total_memory)}"
+    )
     print(f"Allocated GPU memory: {humanize.naturalsize(torch.cuda.memory_allocated(0))}")
     print(f"Reserved GPU memory: {humanize.naturalsize(torch.cuda.memory_reserved(0))}")
 

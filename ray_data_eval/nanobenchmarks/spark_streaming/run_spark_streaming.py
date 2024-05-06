@@ -3,7 +3,7 @@ A script to generate data for spark streaming run
 
 Runbook:
 1. run Netcat as a data server: ncat --keep-open --listen -p 1234
-2. in a different terminal, start the spark streaming application: 
+2. in a different terminal, start the spark streaming application:
     ./bin/spark-submit path/to/file/spark_streaming_wordcount.py localhost 1234
 3. run gen_streaming_data to send data
 """

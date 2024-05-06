@@ -76,16 +76,12 @@ if __name__ == "__main__":
     print("Total time: ", total_time)
 
     print(ds.stats())
-    print(
-        ray._private.internal_api.memory_summary(stats_only=True)
-    )  # check whether spilled
+    print(ray._private.internal_api.memory_summary(stats_only=True))  # check whether spilled
 
     save_ray_timeline()
 
     output_file = "output.csv"
     with open(output_file, "a+") as f:
-        f.write(
-            f"Batch size: {BATCH_SIZE}, tput: {tput}, inference time {inf_total_time}\n"
-        )
+        f.write(f"Batch size: {BATCH_SIZE}, tput: {tput}, inference time {inf_total_time}\n")
 
     ray.shutdown()
