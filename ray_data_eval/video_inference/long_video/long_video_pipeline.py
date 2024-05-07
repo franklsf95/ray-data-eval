@@ -1,4 +1,3 @@
-import argparse
 import contextlib
 import functools
 import io
