@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_io as tfio
 import torch
 import torch.nn as nn
 import torchvision.models as models
@@ -6,17 +7,31 @@ import torchvision.models as models
 from util import IMAGENET_WNID_TO_ID
 import os
 import time
+import argparse
 import functools
 from ray_data_eval.video_inference.ray_data_pipeline_helpers import postprocess
 
+USE_LOCAL = False
 
 traindir = os.path.join("/home/ubuntu/image-data/ILSVRC/Data/CLS-LOC", "train")
 vardir = os.path.join("/home/ubuntu/image-data/ILSVRC/Data/CLS-LOC", "var")
 
+parser = argparse.ArgumentParser(description="tf.data ImageNet Training")
+parser.add_argument(
+    "-b",
+    "--batch-size",
+    default=256,
+    type=int,
+    metavar="N",
+    help="mini-batch size (default: 256), this is the total "
+    "batch size of all GPUs on the current node when "
+    "using Data Parallel or Distributed Data Parallel",
+)
+
 
 def load_and_decode_image(file_path):
     image = tf.io.read_file(file_path)
-    image = tf.image.decode_jpeg(image, channels=3)
+    image = tf.io.decode_jpeg(image, channels=3)
     image = tf.cast(image, tf.float32)
     image = image / 255.0
     return image
@@ -106,8 +121,15 @@ def train_one_epoch(dataset, model, criterion, optimizer, device, start_time):
 
 @timeit
 def main():
+    args = parser.parse_args()
+
     # Get the list of filenames and labels
     train_filenames, train_labels = list_filenames_labels(traindir, IMAGENET_WNID_TO_ID)
+    if not USE_LOCAL:
+        train_filenames = [
+            path.replace("/home/ubuntu/image-data/", "s3://ray-data-eval-us-west-2/imagenet/")
+            for path in train_filenames
+        ]
 
     start_time = time.time()
     print("[Start Time]", start_time, flush=True)
@@ -137,10 +159,11 @@ def main():
         lambda x, y: (train_transform(x), y),
         num_parallel_calls=tf.data.AUTOTUNE,
     )
-    train_dataset = train_dataset.batch(batch_size=256)
+    train_dataset = train_dataset.batch(batch_size=args.batch_size)
     train_dataset = train_dataset.prefetch(buffer_size=tf.data.AUTOTUNE)
 
     train_one_epoch(train_dataset, model, criterion, optimizer, device, start_time)
+    postprocess(f"tf_data_e2e_training_g5_xlarge_batch_{args.batch_size}.out")
 
 
 if __name__ == "__main__":
@@ -150,5 +173,3 @@ if __name__ == "__main__":
         tf.config.experimental.set_memory_growth(device, True)
 
     main()
-
-    postprocess("tf_data_e2e_training_g5_xlarge_batch_256.out")

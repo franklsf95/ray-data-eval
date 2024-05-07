@@ -210,11 +210,11 @@ def main():
     global timeline_filename
     global gpu_timeline_filename  # for flushing the gpu event log
     if is_s3:
-        timeline_filename = f"ray_data_training_cluster_26_g5_xlarge_s3_b_{args.batch_size}.json"
-        gpu_timeline_filename = f"ray_data_training_cluster_26_g5_xlarge_s3_b_{args.batch_size}_gpu.json"
+        timeline_filename = f"ray_data_training_g5_xlarge_s3_b_{args.batch_size}.json"
+        gpu_timeline_filename = f"ray_data_training_g5_xlarge_s3_b_{args.batch_size}_gpu.json"
     else:
-        timeline_filename = f"ray_data_training_g5_xlarge_b_{args.batch_size}.json"
-        gpu_timeline_filename = f"ray_data_training_g5_xlarge_b_{args.batch_size}_gpu.json"
+        timeline_filename = f"ray_data_training_g5_xlarge_local_b_{args.batch_size}.json"
+        gpu_timeline_filename = f"ray_data_training_g5_xlarge_local_b_{args.batch_size}_gpu.json"
 
     if args.seed is not None:
         random.seed(args.seed)
