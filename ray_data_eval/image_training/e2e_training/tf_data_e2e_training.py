@@ -1,5 +1,5 @@
 import tensorflow as tf
-import tensorflow_io as tfio
+import tensorflow_io as tfio  # noqa: F401
 import torch
 import torch.nn as nn
 import torchvision.models as models
