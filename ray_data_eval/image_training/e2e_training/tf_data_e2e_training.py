@@ -22,21 +22,18 @@ parser.add_argument(
     "--batch-size",
     default=256,
     type=int,
-    metavar="N",
-    help="mini-batch size (default: 256), this is the total "
-    "batch size of all GPUs on the current node when "
-    "using Data Parallel or Distributed Data Parallel",
 )
 
 
+@tf.function
 def load_and_decode_image(file_path):
     image = tf.io.read_file(file_path)
     image = tf.io.decode_jpeg(image, channels=3)
-    image = tf.cast(image, tf.float32)
-    image = image / 255.0
+    image = tf.cast(image, tf.float32) / 255.0
     return image
 
 
+@tf.function
 def train_transform(image):
     image = tf.image.random_flip_left_right(image)
     image = tf.image.resize(image, [256, 256])
@@ -45,6 +42,7 @@ def train_transform(image):
     return image
 
 
+@tf.function
 def val_transform(image):
     image = tf.image.resize(image, [256, 256])
     image = tf.image.central_crop(image, central_fraction=0.765625)  # Crop to (224, 224)
@@ -148,9 +146,17 @@ def main():
     # - batch + prefetch
     train_dataset = tf.data.Dataset.from_tensor_slices((train_filenames, train_labels))
 
+    # Set number of threads to use
+    # options = tf.data.Options()
+    # options.threading.private_threadpool_size = 4096 * 4
+    # train_dataset = train_dataset.with_options(options)
+
     train_dataset = train_dataset.interleave(
-        lambda filename, label: tf.data.Dataset.from_tensors((filename, label)).map(
-            lambda x, y: (load_and_decode_image(x), y)
+        lambda filename, label: tf.data.Dataset.from_tensors((filename, label))
+        # .with_options(options)
+        .map(
+            lambda x, y: (load_and_decode_image(x), y),
+            num_parallel_calls=tf.data.AUTOTUNE,
         ),
         num_parallel_calls=tf.data.AUTOTUNE,
     )
