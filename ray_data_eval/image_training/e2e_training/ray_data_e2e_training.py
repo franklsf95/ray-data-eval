@@ -24,13 +24,15 @@ import torchvision.transforms as transforms
 from torch.optim.lr_scheduler import StepLR
 from ray.data.datasource.partitioning import Partitioning
 
+from ray_data_eval.video_inference.ray_data_pipeline_helpers import postprocess
+
 model_names = sorted(
     name
     for name in models.__dict__
     if name.islower() and not name.startswith("__") and callable(models.__dict__[name])
 )
 
-parser = argparse.ArgumentParser(description="PyTorch ImageNet Training")
+parser = argparse.ArgumentParser(description="Ray Data ImageNet Training")
 parser.add_argument(
     "data", metavar="DIR", nargs="?", default="imagenet", help="path to dataset (default: imagenet)"
 )
@@ -199,18 +201,20 @@ class ChromeTracer:
 
 # Training
 def main():
+    global start_time
+    start_time = time.time()
+    print("[Start Time]", start_time, flush=True)
+
     args = parser.parse_args()
     is_s3 = args.data.startswith("s3://")
     global timeline_filename
     global gpu_timeline_filename  # for flushing the gpu event log
     if is_s3:
-        # timeline_filename = f"ray_data_training_a100_s3_b_{args.batch_size}.json"
-        # gpu_timeline_filename = f"ray_data_training_a100_s3_b_{args.batch_size}_gpu.json"
-        timeline_filename = f"ray_data_training_cluster_26_a100_s3_b_{args.batch_size}.json"
-        gpu_timeline_filename = f"ray_data_training_cluster_26_a100_s3_b_{args.batch_size}_gpu.json"
+        timeline_filename = f"ray_data_training_g5_xlarge_s3_b_{args.batch_size}.json"
+        gpu_timeline_filename = f"ray_data_training_g5_xlarge_s3_b_{args.batch_size}_gpu.json"
     else:
-        timeline_filename = f"ray_data_training_a100_b_{args.batch_size}.json"
-        gpu_timeline_filename = f"ray_data_training_a100_b_{args.batch_size}_gpu.json"
+        timeline_filename = f"ray_data_training_g5_xlarge_local_b_{args.batch_size}.json"
+        gpu_timeline_filename = f"ray_data_training_g5_xlarge_local_b_{args.batch_size}_gpu.json"
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -258,6 +262,7 @@ def main():
     ray.timeline(timeline_filename)
 
     append_gpu_timeline(timeline_filename, gpu_timeline_filename)
+    postprocess("e2e_training_s3_g5_xlarge_batch_256.out")
 
 
 def main_worker(gpu, ngpus_per_node, args):
@@ -458,7 +463,7 @@ def train(train_dataset, model, criterion, optimizer, epoch, device, args):
     model.train()
 
     i = 0
-    end = time.time()
+    end = start_time
 
     def _collate_fn_arr_pil_images_to_tensor(batch: dict) -> dict:
         """Each batch is a dict consisting two keys, image and label."""
@@ -507,11 +512,22 @@ def train(train_dataset, model, criterion, optimizer, epoch, device, args):
             optimizer.step()
 
             # measure elapsed time
-            batch_time.update(time.time() - end)
+            training_end_time = time.time()
+            elapsed_time = training_end_time - end
+            batch_time.update(elapsed_time)
             end = time.time()
 
             if i % args.print_freq == 0:
                 progress.display(i + 1)
+
+        print(
+            "[Completed Batch]",
+            training_end_time,
+            len(batch["image"]),
+            "[Training Tput]",
+            len(batch["image"]) / elapsed_time,
+            flush=True,
+        )
 
     chrome_tracer.save()
 
